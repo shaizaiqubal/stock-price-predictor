@@ -4,7 +4,7 @@ import pandas as pd
 import pickle
 import plotly.express as px
 
-from model import predict
+from main import predict
 
 with open('model.pkl',"rb") as pkl:
     model, scaler = pickle.load(pkl)
