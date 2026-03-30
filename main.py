@@ -8,7 +8,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 def build_features(df):
-    df_copy=df.copy()
+    df_copy = df[['Close']].copy()
+    df_copy.columns = ['Close']
     df_copy['prev_close']=df_copy['Close'].shift(1)
     df_copy['returns']=(df_copy['Close']-df_copy['prev_close'])/df_copy['prev_close']
     df_copy = df_copy.dropna().copy()
