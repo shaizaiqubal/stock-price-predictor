@@ -2,22 +2,43 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import pickle
-import plotly.express as px
+import plotly.graph_objects as go
 import yfinance as yf
+from sklearn.model_selection import train_test_split
 
-from main import predict
+from main import predict, build_features
 
 with open('model.pkl',"rb") as pkl:
     model, scaler = pickle.load(pkl)
 
+def run_backtest(df):
+    X, y, features_df = build_features(df)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+    X_test_scaled = scaler.transform(X_test)
+    close_l = df['Close'].values.flatten()
+    train_size = len(X_train)
+    strategy_returns, bah_returns = [], []
+    for i in range(len(X_test)):
+        actual_ret = float((close_l[train_size + i + 1] - close_l[train_size + i]) / close_l[train_size + i])
+        ypr = model.predict([X_test_scaled[i]])[0]
+        strategy_returns.append(actual_ret if ypr == 1 else 0)
+        bah_returns.append(actual_ret)
+
+    return [1] + list(np.cumprod([1 + r for r in strategy_returns])), \
+    [1] + list(np.cumprod([1 + r for r in bah_returns]))
+
+
 def main():
     st.title("Real-Time Stock Trend Predictor")
     st.write("Predicts next-day movement using machine learning")
-    ticker = st.text_input("Enter Enter stock ticker (e.g. AAPL, TSLA, RELIANCE.NS)")
+    ticker_options = ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "NVDA", "META", "NFLX", "JPM", "Custom"]
+    ticker = st.selectbox("Select a stock ticker", options=ticker_options)
+    if ticker == "Custom":
+        ticker = st.text_input("Enter custom stock ticker")
 
     if st.button('Predict'):
         try:
-            data = yf.download(ticker, period='10d')
+            data = yf.download(ticker, period='1y')
         except:
             st.error("Falied to fetch data.")
             
@@ -27,56 +48,39 @@ def main():
             if len(df)<5:
                 st.error("Not enough prices! Please try another ticker")
             else:
-                y_pred, probability= predict(df, model, scaler)
-                st.write(f"Ticker: {ticker}")
-                st.write(f"Latest Close: {df['Close'].iloc[-1].item():.2f}")
+                y_pred, probability, features_df= predict(df, model, scaler)
 
+                #Stats
+                st.markdown(f"### 📈 {ticker}: Current Market Signals")
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Latest Close", f"${df['Close'].iloc[-1].item():.2f}")
+                col2.metric("RSI", f"{features_df['rsi'].iloc[-1]:.1f}")
+                col3.metric("Price Position", f"{features_df['price_position'].iloc[-1]:.2f}")
+                col4.metric("SMA Crossover", "Bullish" if features_df['sma_crossover'].iloc[-1] == 1 else "Bearish")
+
+                #prediction
                 st.markdown("### 📊 Prediction Result")
                 if y_pred[0]==1:
                     st.success("The price is likely to go UP")            
                 else:
                     st.error("The price is likely to go DOWN")
                 
+                prob = probability[0][1] if y_pred[0] == 1 else probability[0][0]
+                #st.write(f"Confidence: {prob*100:.1f}%")
+
+                st.markdown("### 💹 Recent Price")
                 st.line_chart(df['Close'])
 
+                #Backtest
+                st.markdown("### 🔁 Backtest: Model vs Buy & Hold")
+                strategy, bah = run_backtest(df)
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(y=strategy, name='Model Strategy'))
+                fig.add_trace(go.Scatter(y=bah, name='Buy & Hold'))
+                fig.update_layout(xaxis_title='Trading Days', yaxis_title='Portfolio Value ($1 start)')
+                st.plotly_chart(fig)
+
+
             
-    # st.write("Input last 3 closing prices")
-    # a = st.number_input('Closing Price 1:', value=0.0)
-    # b = st.number_input('Closing Price 2:', value=0.0)
-    # c = st.number_input('Closing Price 3:', value=0.0)
-    # d = st.number_input('Closing Price 4:', value=0.0)
-    # e = st.number_input('Closing Price 5:', value=0.0)
-
-    # df = pd.DataFrame([a, b, c, d, e ], columns=["Close"])
-
-    # if st.button('Predict'):
-    #     y_pred, probability= predict(df, model, scaler)
-    #     st.markdown("### 📊 Prediction Result")
-    #     if y_pred[0]==1:
-    #         st.success("The price is likely to go UP")
-    #         # st.write(f"Confidence:{probability[:,1][0]*100:0.3f}%")
-    #         # st.progress(probability[:,1][0])
-    #     else:
-    #         st.error("The price is likely to go DOWN")
-    #         # st.write(f"Confidence:{probability[:,0][0]*100:0.3f}%")
-    #         # st.progress(probability[:,1][0])
-
-    #     st.line_chart(df['Close'])
-
-    #     df_plot = df.copy()
-    #     df_plot['Day'] = df_plot.index.to_series().astype(float) + 1.0
-
-    #     fig = px.line(
-    #         df_plot,
-    #         x='Day',
-    #         y='Close',
-    #         markers=True,
-    #         title='Closing Prices',
-    #         labels={'Day': 'Day', 'Close': 'Closing Price'}
-    #     )
-    #     fig.update_xaxes(type='linear', tickmode='linear', tick0=1, dtick=1)
-    #     st.plotly_chart(fig, width='stretch')
-
-
 if __name__ == '__main__':
     main()
